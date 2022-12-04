@@ -1,0 +1,44 @@
+name: Deploy New Version (PROD)
+
+on:
+  push:
+    tags:
+      - "v1.*.**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set env
+        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+
+      - name: Test
+        run: |
+          echo $RELEASE_VERSION
+          echo ${{ env.RELEASE_VERSION }}
+      - name: Create SSH key file
+        run: echo "${{ secrets.SSH_KEY }}" > id_rsa && chmod 600 id_rsa
+
+      - name: Prepare deploy-script
+        run: |
+          cat > deploy-script.sh <<EOF
+          cd ${{ secrets.PROJECT_FOLDER }}
+          git reset --hard
+          git clean -df
+          git fetch --all --tags
+          git checkout tags/${{ env.RELEASE_VERSION }} -b ${{ env.RELEASE_VERSION }}-branch
+          npm install
+          npm run build
+          pm2 delete ${{ secrets.PROJECT_FOLDER }}
+          pm2 start --name=${{ secrets.PROJECT_FOLDER }} 'npm run start'
+          EOF
+      - name: Run deploy-script on server
+        run: >
+          ssh "${{ secrets.USERNAME }}"@"${{ secrets.HOST }}"
+          -o StrictHostKeyChecking=accept-new
+          -i id_rsa
+          "bash -s"
+          < deploy-script.sh
